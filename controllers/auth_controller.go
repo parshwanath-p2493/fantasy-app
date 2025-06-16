@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fantasy-backend/database"
 	"fantasy-backend/models"
+	"fantasy-backend/utils"
 	"net/http"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -38,4 +40,34 @@ func Signup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Write([]byte("User created"))
+}
+func Login(w http.ResponseWriter, r *http.Request) {
+	var user models.User
+	var userCollection = database.DB.Collection("users")
+
+	_ = json.NewDecoder(r.Body).Decode(&user)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var dbUser models.User
+	err := userCollection.FindOne(ctx, bson.M{"username": user.Username}).Decode(&dbUser)
+	if err == mongo.ErrNoDocuments {
+		http.Error(w, "User not found", http.StatusUnauthorized)
+		return
+	}
+
+	err = bcrypt.CompareHashAndPassword([]byte(dbUser.Password), []byte(user.Password))
+	if err != nil {
+		http.Error(w, "Incorrect password", http.StatusUnauthorized)
+		return
+	}
+
+	token, err := utils.GenerateJWT(user.Username)
+	if err != nil {
+		http.Error(w, "Could not generate token", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{"token": token})
 }
